@@ -1,3 +1,4 @@
+// In utils/api.ts
 import { ApiResponse, DexScreenerResponse, ProcessedTokenData } from "../types";
 import { formatNumber } from "./utils";
 
@@ -7,19 +8,21 @@ const DEXSCREENER_BASE_URL = "https://api.dexscreener.com/latest/dex/pairs";
 const chainIdMap: { [key: string]: string } = {
   eth: "ethereum",
   solana: "solana",
+  "sui-network": "sui",
 };
 
-export async function fetchTrendingPools(): Promise<ProcessedTokenData[]> {
+export async function* fetchTrendingPools(): AsyncGenerator<
+  ProcessedTokenData,
+  void,
+  unknown
+> {
   const response = await fetch(
     `${GECKO_TERMINAL_BASE_URL}/networks/trending_pools`
   );
-
   if (!response.ok) {
     throw new Error(`HTTP error! status: ${response.status}`);
   }
-
   const result = (await response.json()) as ApiResponse;
-  const data: ProcessedTokenData[] = [];
 
   for (const pool of result.data) {
     const network = pool.relationships.network.data.id;
@@ -35,27 +38,29 @@ export async function fetchTrendingPools(): Promise<ProcessedTokenData[]> {
         const liquidity = pairInfo.liquidity.usd;
         const createTime = new Date(pairInfo.pairCreatedAt).toLocaleString();
 
-        if (liquidity < 50000) continue;
+        if (liquidity >= 50000 && volume24h >= 1000000) {
+          const item: ProcessedTokenData = {
+            Name: `${baseToken.name} (${baseToken.symbol})`,
+            "Contract Address": baseToken.address,
+            Network: chainId,
+            FDV: `$${formatNumber(pairInfo?.fdv)}` || "",
+            "24h Volume": `$${formatNumber(volume24h)}`,
+            "Logo URL": pairInfo?.info?.imageUrl || "",
+            Liquidity: `$${formatNumber(liquidity)}`,
+            Price: `$${pairInfo?.priceUsd}` || "",
+            "24h PriceChange": `${pairInfo.priceChange.h24}%`,
+            Twitter:
+              pairInfo.info?.socials?.find((s) => s.type === "twitter")?.url ||
+              "",
+            Website: pairInfo?.info?.websites[0]?.url || "",
+            "DexScreener Url": pairInfo?.url,
+            createTime,
+            _volume24h: volume24h,
+          };
 
-        const item: ProcessedTokenData = {
-          Name: `${baseToken.name} (${baseToken.symbol})`,
-          "Contract Address": baseToken.address,
-          Network: chainId,
-          FDV: `$${formatNumber(pairInfo.fdv)}`,
-          "24h Volume": `$${formatNumber(volume24h)}`,
-          "Logo URL": pairInfo.info.imageUrl || "N/A",
-          Liquidity: `$${formatNumber(liquidity)}`,
-          Price: `$${pairInfo.priceUsd}`,
-          "24h PriceChange": `${pairInfo.priceChange.h24}%`,
-          Twitter:
-            pairInfo.info.socials.find((s) => s.type === "twitter")?.url ||
-            "N/A",
-          Website: pairInfo.info.websites[0]?.url || "N/A",
-          "DexScreener Url": pairInfo.url,
-          createTime,
-          _volume24h: volume24h,
-        };
-        data.push(item);
+          console.log(item["Logo URL"]);
+          yield item;
+        }
       }
     } catch (error) {
       console.error(
@@ -63,9 +68,6 @@ export async function fetchTrendingPools(): Promise<ProcessedTokenData[]> {
       );
     }
   }
-
-  data.sort((a, b) => b._volume24h - a._volume24h);
-  return data.slice(0, 10);
 }
 
 export async function fetchTokenInfo(
@@ -75,10 +77,8 @@ export async function fetchTokenInfo(
   const response = await fetch(
     `${DEXSCREENER_BASE_URL}/${chainId}/${pairAddress}`
   );
-
   if (!response.ok) {
     throw new Error(`HTTP error! status: ${response.status}`);
   }
-
   return (await response.json()) as DexScreenerResponse;
 }
